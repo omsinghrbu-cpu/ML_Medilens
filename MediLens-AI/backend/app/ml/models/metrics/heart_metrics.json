@@ -1,0 +1,10 @@
+{
+  "model": "heart",
+  "accuracy": 0.9344,
+  "precision": 0.9344,
+  "recall": 1.0,
+  "f1": 0.9661,
+  "roc_auc": 0.6535,
+  "train_samples": 242,
+  "test_samples": 61
+}

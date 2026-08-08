@@ -1,0 +1,10 @@
+{
+  "model": "diabetes",
+  "accuracy": 0.9026,
+  "precision": 0.9508,
+  "recall": 0.928,
+  "f1": 0.9393,
+  "roc_auc": 0.9683,
+  "train_samples": 614,
+  "test_samples": 154
+}

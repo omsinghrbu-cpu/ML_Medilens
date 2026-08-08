@@ -1,0 +1,5 @@
+{
+  "name": "medilens-ai",
+  "private": true,
+  "scripts": { "dev": "npm --prefix frontend run dev", "build": "npm --prefix frontend run build", "backend": "uvicorn app.main:app --reload --app-dir backend" }
+}
