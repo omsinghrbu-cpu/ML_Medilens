@@ -45,6 +45,72 @@ def _trend_label(category: str, direction: str) -> str:
     return labels.get((category, direction), f"{direction} {category.replace('_', ' ')} trend")
 
 
+def compute_trend_deltas(trends: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Generate structured Previous -> Current -> % Change -> Clinical Interpretation deltas."""
+    deltas = []
+    interpretations = {
+        "hba1c": {
+            "Increasing": "Poor Glycemic Control — Escalating Diabetes Risk",
+            "Decreasing": "Improving Glycemic Regulation",
+            "Stable": "Stable Long-Term Glucose Control",
+        },
+        "glucose": {
+            "Increasing": "Elevated Fasting Glucose Trajectory",
+            "Decreasing": "Normalizing Blood Glucose Level",
+            "Stable": "Normoglycemic Fasting Range",
+        },
+        "blood_pressure": {
+            "Increasing": "Progressive Elevation in Blood Pressure — Stage 1-2 Hypertension Vector",
+            "Decreasing": "Improved Antihypertensive Response",
+            "Stable": "Controlled Hemodynamic Pressure",
+        },
+        "creatinine": {
+            "Increasing": "Renal Function Decline — Nephron Stress Indicator",
+            "Decreasing": "Improved Glomerular Clearance",
+            "Stable": "Stable Serum Renal Clearance",
+        },
+        "cholesterol": {
+            "Increasing": "Elevated Hypercholesterolemia Trajectory",
+            "Decreasing": "Favorable Lipid Profile Improvement",
+            "Stable": "Controlled Total Lipid Baseline",
+        },
+        "weight": {
+            "Increasing": "Weight Gain — Potential Metabolic Stress Factor",
+            "Decreasing": "Favorable Weight Reduction",
+            "Stable": "Stable Body Mass Trajectory",
+        },
+        "egfr": {
+            "Decreasing": "Declining Kidney Filtration Rate — Nephrology Review Recommended",
+            "Increasing": "Improving Glomerular Filtration Capacity",
+            "Stable": "Preserved Renal Filtration Function",
+        },
+    }
+
+    for t in trends:
+        cat = t["category"]
+        first_val = t["first"]
+        last_val = t["last"]
+        direction = t["direction"]
+        
+        pct_change = round(((last_val - first_val) / max(abs(first_val), 0.1)) * 100, 1)
+        direction_icon = "↑" if direction == "Increasing" else "↓" if direction == "Decreasing" else "→"
+        interp = interpretations.get(cat, {}).get(
+            direction, f"{direction} trajectory requiring routine tracking"
+        )
+
+        deltas.append({
+            "category": cat,
+            "name": cat.replace("_", " ").title(),
+            "previous_value": first_val,
+            "current_value": last_val,
+            "pct_change": pct_change,
+            "direction": direction,
+            "direction_icon": direction_icon,
+            "interpretation": interp,
+        })
+    return deltas
+
+
 def detect_trends(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Detect trends across lab and vital categories."""
     series: dict[str, list[tuple[str, float]]] = {}
@@ -72,3 +138,4 @@ def detect_trends(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "change": round(values[-1] - values[0], 2),
         })
     return trends
+

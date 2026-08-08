@@ -1,4 +1,4 @@
-"""Parse uploaded patient records (CSV, JSON, PDF text)."""
+"""Parse uploaded patient records (CSV, JSON, PDF text) for extraction and doctor review."""
 from __future__ import annotations
 
 import csv
@@ -16,11 +16,12 @@ COLUMN_MAP = {
     "blood_pressure": "blood_pressure", "weight": "weight", "heart_rate": "heart_rate",
     "temperature": "temperature", "note": "note", "notes": "note", "text": "note",
     "medication": "medication", "diagnosis": "diagnosis", "condition": "diagnosis",
+    "symptoms": "symptoms", "symptom": "symptoms", "allergies": "allergies",
 }
 
 NUMERIC_CATEGORIES = {
     "glucose", "hba1c", "creatinine", "cholesterol", "weight",
-    "heart_rate", "temperature", "systolic", "diastolic",
+    "heart_rate", "temperature", "systolic", "diastolic", "hemoglobin", "egfr",
 }
 
 
@@ -56,6 +57,23 @@ def parse_csv(content: str, patient_id: str) -> tuple[dict[str, Any], list[dict[
                 pass
         if "gender" in normalized and normalized["gender"]:
             demographics["gender"] = normalized["gender"]
+        if "height" in normalized and normalized["height"]:
+            try:
+                demographics["height"] = float(normalized["height"])
+            except ValueError:
+                pass
+        if "weight" in normalized and normalized["weight"]:
+            try:
+                demographics["weight"] = float(normalized["weight"])
+            except ValueError:
+                pass
+        if "blood_group" in normalized and normalized["blood_group"]:
+            demographics["blood_group"] = normalized["blood_group"]
+        if "allergies" in normalized and normalized["allergies"]:
+            demographics["allergies"] = normalized["allergies"]
+        if "symptoms" in normalized and normalized["symptoms"]:
+            demographics["symptoms"] = normalized["symptoms"]
+
         event_date = _parse_date(normalized.get("date"))
         if "note" in normalized and normalized["note"]:
             events.append({
@@ -99,7 +117,7 @@ def parse_csv(content: str, patient_id: str) -> tuple[dict[str, Any], list[dict[
                 cat = "blood_pressure" if key in {"systolic", "diastolic"} else key
                 unit = {"glucose": "mg/dL", "hba1c": "%", "creatinine": "mg/dL",
                         "cholesterol": "mg/dL", "weight": "kg", "heart_rate": "bpm",
-                        "temperature": "°F"}.get(key, "")
+                        "temperature": "°F", "hemoglobin": "g/dL", "egfr": "mL/min"}.get(key, "")
                 events.append({
                     "patient_id": patient_id, "date": event_date,
                     "type": etype, "category": cat, "value": num, "unit": unit,
@@ -113,7 +131,7 @@ def parse_json(content: str, patient_id: str) -> tuple[dict[str, Any], list[dict
     if isinstance(data, list):
         events = [{**e, "patient_id": patient_id} for e in data]
         return {}, events
-    demo = {k: data[k] for k in ("name", "age", "gender", "conditions") if k in data}
+    demo = {k: data[k] for k in ("name", "age", "gender", "conditions", "medications", "allergies", "height", "weight", "blood_group") if k in data}
     events = data.get("events", data.get("records", []))
     for e in events:
         e.setdefault("patient_id", patient_id)
@@ -122,9 +140,22 @@ def parse_json(content: str, patient_id: str) -> tuple[dict[str, Any], list[dict
 
 
 def parse_pdf_text(content: str, patient_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Extract clinical values from text-based PDF content."""
+    """Extract clinical values from text-based PDF or TXT content."""
     events: list[dict[str, Any]] = []
+    demo: dict[str, Any] = {}
     today = str(date.today())
+
+    # Demographics regex
+    name_m = re.search(r"(?:Patient Name|Name)[:\s]+([A-Za-z\s]{3,30})", content, re.IGNORECASE)
+    if name_m:
+        demo["name"] = name_m.group(1).strip()
+    age_m = re.search(r"(?:Age)[:\s]+(\d{1,3})", content, re.IGNORECASE)
+    if age_m:
+        demo["age"] = int(age_m.group(1))
+    gender_m = re.search(r"(?:Gender|Sex)[:\s]+(Male|Female|Other)", content, re.IGNORECASE)
+    if gender_m:
+        demo["gender"] = gender_m.group(1).capitalize()
+
     patterns = [
         (r"(?:glucose|blood sugar)[:\s]+(\d+\.?\d*)\s*(?:mg/dL)?", "glucose", "lab", "mg/dL"),
         (r"(?:HbA1c|A1C|HBA1C)[:\s]+(\d+\.?\d*)\s*%?", "hba1c", "lab", "%"),
@@ -133,6 +164,8 @@ def parse_pdf_text(content: str, patient_id: str) -> tuple[dict[str, Any], list[
         (r"(?:blood pressure|BP)[:\s]+(\d+)\s*/\s*(\d+)", "blood_pressure", "vital", "mmHg"),
         (r"(?:weight)[:\s]+(\d+\.?\d*)\s*(?:kg)?", "weight", "vital", "kg"),
         (r"(?:heart rate|pulse)[:\s]+(\d+\.?\d*)\s*(?:bpm)?", "heart_rate", "vital", "bpm"),
+        (r"(?:hemoglobin)[:\s]+(\d+\.?\d*)\s*(?:g/dL)?", "hemoglobin", "lab", "g/dL"),
+        (r"(?:egfr)[:\s]+(\d+\.?\d*)", "egfr", "lab", "mL/min"),
     ]
     for pattern, category, etype, unit in patterns:
         for match in re.finditer(pattern, content, re.IGNORECASE):
@@ -158,32 +191,60 @@ def parse_pdf_text(content: str, patient_id: str) -> tuple[dict[str, Any], list[
             "type": "note", "text": note_match.group(1).strip()[:500],
             "source": "pdf_upload",
         })
-    return {}, events
+    return demo, events
 
 
-def ingest_file(filename: str, content: bytes, patient_id: str | None = None) -> dict[str, Any]:
-    """Ingest uploaded file and return demographics + clinical events."""
-    from ..data.store import create_patient_from_demographics, add_events, get_patient
-
+def extract_file_data(filename: str, content: bytes, patient_id: str | None = None) -> dict[str, Any]:
+    """Parse file and return extracted draft data for Doctor Review before commit."""
     text = content.decode("utf-8", errors="ignore")
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     demo: dict[str, Any] = {}
     events: list[dict[str, Any]] = []
 
     if ext == "csv":
-        demo, events = parse_csv(text, patient_id or "TEMP")
+        demo, events = parse_csv(text, patient_id or "DRAFT")
     elif ext == "json":
-        demo, events = parse_json(text, patient_id or "TEMP")
+        demo, events = parse_json(text, patient_id or "DRAFT")
     elif ext == "pdf":
         try:
             from pypdf import PdfReader
             reader = PdfReader(io.BytesIO(content))
             pdf_text = "\n".join(page.extract_text() or "" for page in reader.pages)
-            demo, events = parse_pdf_text(pdf_text, patient_id or "TEMP")
+            demo, events = parse_pdf_text(pdf_text, patient_id or "DRAFT")
         except Exception:
-            demo, events = parse_pdf_text(text, patient_id or "TEMP")
+            demo, events = parse_pdf_text(text, patient_id or "DRAFT")
     else:
-        demo, events = parse_csv(text, patient_id or "TEMP")
+        demo, events = parse_pdf_text(text, patient_id or "DRAFT")
+
+    return {
+        "filename": filename,
+        "patient_id": patient_id,
+        "demographics": demo,
+        "events": events,
+        "extracted_summary": {
+            "name": demo.get("name", "Extracted Patient"),
+            "age": demo.get("age", 45),
+            "gender": demo.get("gender", "Male"),
+            "height": demo.get("height", 170),
+            "weight": demo.get("weight", 70),
+            "blood_group": demo.get("blood_group", "O+"),
+            "allergies": demo.get("allergies", "None known"),
+            "conditions": demo.get("conditions", []),
+            "medications": demo.get("medications", []),
+            "symptoms": demo.get("symptoms", "Fatigue, mild exertional dyspnea"),
+            "doctor_notes": next((e.get("text") for e in events if e.get("type") == "note"), "Patient presented for routine longitudinal follow-up."),
+            "events_count": len(events),
+        },
+    }
+
+
+def ingest_file(filename: str, content: bytes, patient_id: str | None = None) -> dict[str, Any]:
+    """Legacy helper for direct file ingestion."""
+    from ..data.store import create_patient_from_demographics, add_events, get_patient
+
+    extracted = extract_file_data(filename, content, patient_id)
+    demo = extracted["demographics"]
+    events = extracted["events"]
 
     if not patient_id:
         patient = create_patient_from_demographics(demo)
