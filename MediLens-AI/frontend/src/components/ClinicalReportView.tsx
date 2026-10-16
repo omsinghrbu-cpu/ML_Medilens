@@ -8,6 +8,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
 import type { PatientDetail, ReportSavedEntry } from '../lib/api'
+import { generatePatientAnalysis } from '../lib/mockData'
 
 interface ClinicalReportViewProps {
   patient: PatientDetail
@@ -15,7 +16,8 @@ interface ClinicalReportViewProps {
 }
 
 export function ClinicalReportView({ patient }: ClinicalReportViewProps) {
-  const a = patient.analysis
+  const fallbackAnalysis = generatePatientAnalysis(patient)
+  const a = patient.analysis || fallbackAnalysis
   const [timelineSearch, setTimelineSearch] = useState('')
   const [selectedReportId, setSelectedReportId] = useState<string>('')
   const [comparing, setComparing] = useState(false)
@@ -482,8 +484,8 @@ export function ClinicalReportView({ patient }: ClinicalReportViewProps) {
         <section className="report-section">
           <h3 className="section-title"><AlertTriangle size={18} /> Flagged Anomalies & Risk Signals</h3>
           <div className="anomaly-grid">
-            {displayAnalysis.anomalies.length ? (
-              displayAnalysis.anomalies.map((anom) => (
+            {(displayAnalysis.anomalies || []).length ? (
+              (displayAnalysis.anomalies || []).map((anom) => (
                 <div className={`anomaly-card sev-${anom.severity}`} key={anom.id}>
                   <AlertTriangle size={18} />
                   <div>
@@ -505,13 +507,13 @@ export function ClinicalReportView({ patient }: ClinicalReportViewProps) {
             <div className="rec-category card">
               <strong className="rec-title immediate">Immediate Actions</strong>
               <ul>
-                {(displayAnalysis.categorized_recommendations?.immediate_actions || displayAnalysis.recommendations.slice(0, 2)).map((r, i) => <li key={i}>{r}</li>)}
+                {(displayAnalysis.categorized_recommendations?.immediate_actions || (displayAnalysis.recommendations || []).slice(0, 2)).map((r, i) => <li key={i}>{r}</li>)}
               </ul>
             </div>
             <div className="rec-category card">
               <strong className="rec-title monitoring">Monitoring Plan</strong>
               <ul>
-                {(displayAnalysis.categorized_recommendations?.monitoring || displayAnalysis.recommendations.slice(2, 4)).map((r, i) => <li key={i}>{r}</li>)}
+                {(displayAnalysis.categorized_recommendations?.monitoring || (displayAnalysis.recommendations || []).slice(2, 4)).map((r, i) => <li key={i}>{r}</li>)}
               </ul>
             </div>
             <div className="rec-category card">

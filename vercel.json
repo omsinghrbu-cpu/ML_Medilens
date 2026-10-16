@@ -1,0 +1,7 @@
+{
+  "buildCommand": "npm --prefix MediLens-AI/frontend run build",
+  "outputDirectory": "MediLens-AI/frontend/dist",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

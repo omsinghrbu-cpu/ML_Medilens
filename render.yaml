@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: medilens-backend
+    env: python
+    buildCommand: pip install -r MediLens-AI/backend/requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir MediLens-AI/backend
+    plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9

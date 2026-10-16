@@ -1,12 +1,13 @@
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Activity, AlertTriangle, ArrowRight, BrainCircuit, ChevronRight,
-  Database, FileText, HeartPulse, LayoutDashboard, LogOut, Search, Stethoscope, TrendingUp, Upload, User, UserCheck, Users,
+  Activity, AlertTriangle, ArrowRight, CheckCircle2, ChevronRight,
+  Database, FileText, HeartPulse, LayoutDashboard, LogOut, RefreshCw,
+  Search, Settings, Stethoscope, TrendingUp, Upload, User, UserCheck, Users, Wifi, WifiOff,
 } from 'lucide-react'
 import {
-  Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend, BarChart, Bar, Cell,
+  Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 
 import { AuthProvider, useAuth } from './components/AuthContext'
@@ -14,10 +15,11 @@ import { DoctorReviewModal } from './components/DoctorReviewModal'
 import { ClinicalReportView } from './components/ClinicalReportView'
 
 import {
-  analyzePatient, confirmUpload, extractUpload, generateReport,
-  getDashboard, getPatient, getPatients, getReports, getTimeline, uploadRecord,
-  type Anomaly, type ExtractedDraft, type Insight, type Patient, type ReportSavedEntry,
+  analyzePatient, checkBackendConnection, confirmUpload, extractUpload, generateReport,
+  getApiBaseUrl, getDashboard, getPatient, getPatients, getReports, isLiveBackend, setApiBaseUrl,
+  type Anomaly, type DashboardData, type ExtractedDraft, type Patient, type ReportSavedEntry,
 } from './lib/api'
+import { mockGetDashboard, mockGetPatient, mockGetReports } from './lib/mockData'
 
 const nav = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -28,9 +30,97 @@ const nav = [
 
 const riskClass = (risk: string) => `badge ${risk.toLowerCase()}`
 
+/* React Error Boundary */
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('ErrorBoundary caught error:', error, errorInfo)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="error-boundary-wrapper">
+          <div className="error-boundary-card">
+            <AlertTriangle size={40} style={{ color: '#ef4444', margin: '0 auto 12px' }} />
+            <h2>Clinical Workspace Recovered</h2>
+            <p>
+              An unexpected display issue occurred ({this.state.error?.message || 'render fault'}).
+              MediLens AI has preserved your session data.
+            </p>
+            <button
+              className="button"
+              onClick={() => {
+                this.setState({ hasError: false, error: null })
+                window.location.reload()
+              }}
+            >
+              <RefreshCw size={14} /> Reload Workspace
+            </button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, logout, quickLoginDoctor, quickLoginPatient } = useAuth()
   const navigate = useNavigate()
+  const qc = useQueryClient()
+
+  const [connModalOpen, setConnModalOpen] = useState(false)
+  const [isLive, setIsLive] = useState(isLiveBackend())
+  const [apiUrlInput, setApiUrlInput] = useState(getApiBaseUrl())
+  const [testingConn, setTestingConn] = useState(false)
+  const [connFeedback, setConnFeedback] = useState<string | null>(null)
+
+  useEffect(() => {
+    checkBackendConnection().then(setIsLive)
+  }, [])
+
+  const handleTestAndSaveUrl = async () => {
+    setTestingConn(true)
+    setConnFeedback(null)
+    setApiBaseUrl(apiUrlInput)
+    const alive = await checkBackendConnection()
+    setIsLive(alive)
+    setTestingConn(false)
+    if (alive) {
+      setConnFeedback('Successfully connected to live backend API!')
+      qc.invalidateQueries()
+    } else {
+      setConnFeedback('Backend not responding at this URL. Running in Offline Demo Mode.')
+    }
+  }
+
+  const handleResetDefaultUrl = async () => {
+    setTestingConn(true)
+    setConnFeedback(null)
+    setApiBaseUrl('')
+    setApiUrlInput(getApiBaseUrl())
+    const alive = await checkBackendConnection()
+    setIsLive(alive)
+    setTestingConn(false)
+    setConnFeedback(alive ? 'Connected to default API.' : 'Reverted to default URL. Using Demo Mode.')
+    qc.invalidateQueries()
+  }
+
+  const userName = user?.name || (user?.role === 'doctor' ? 'Dr. Sarah Jenkins' : 'Arjun Mehta')
+  const userId = user?.id || (user?.role === 'doctor' ? 'doc_101' : 'P1001')
+  const userRole = user?.role || 'doctor'
 
   return (
     <div className="shell">
@@ -45,19 +135,19 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           <small><UserCheck size={12} /> HACKATHON PRIVACY TESTER</small>
           <div className="role-buttons">
             <button
-              className={`role-chip ${user?.role === 'doctor' && user.id === 'doc_101' ? 'active' : ''}`}
+              className={`role-chip ${userRole === 'doctor' && (userId === 'doc_101' || user?.doctor_id === 'doc_101') ? 'active' : ''}`}
               onClick={() => quickLoginDoctor('dr_jenkins')}
             >
               Dr. Jenkins
             </button>
             <button
-              className={`role-chip ${user?.role === 'doctor' && user.id === 'doc_102' ? 'active' : ''}`}
+              className={`role-chip ${userRole === 'doctor' && (userId === 'doc_102' || user?.doctor_id === 'doc_102') ? 'active' : ''}`}
               onClick={() => quickLoginDoctor('dr_rivera')}
             >
               Dr. Rivera
             </button>
             <button
-              className={`role-chip ${user?.role === 'patient' && user.id === 'P1001' ? 'active' : ''}`}
+              className={`role-chip ${userRole === 'patient' && (userId === 'P1001' || user?.patient_id === 'P1001') ? 'active' : ''}`}
               onClick={() => quickLoginPatient('P1001')}
             >
               Patient P1001
@@ -68,7 +158,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         <nav>
           {nav.map(({ to, label, icon: Icon }) => {
             // Hide Patients cohort list for Patient role
-            if (user?.role === 'patient' && to === '/patients') return null
+            if (userRole === 'patient' && (to === '/patients' || to === '/records')) return null
             return (
               <NavLink key={to} to={to} end={to === '/'}>
                 <Icon size={18} />
@@ -82,8 +172,8 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="user-profile-widget">
             <User size={16} />
             <div>
-              <strong>{user?.name}</strong>
-              <small>{user?.role === 'doctor' ? `Doctor (${user.specialty || 'Cardiology'})` : `Patient (${user?.id})`}</small>
+              <strong>{userName}</strong>
+              <small>{userRole === 'doctor' ? `Doctor (${user?.specialty || 'Cardiology'})` : `Patient (${userId})`}</small>
             </div>
             <button className="logout-btn" onClick={logout} title="Log out">
               <LogOut size={14} />
@@ -95,11 +185,24 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       <main>
         <header>
           <div>
-            <p className="eyebrow">MEDILENS AI CLINICAL PLATFORM</p>
-            <h1>{user?.role === 'doctor' ? `Clinician Workspace — ${user?.name}` : `Patient Medical Portal — ${user?.name}`}</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <p className="eyebrow" style={{ margin: 0 }}>MEDILENS AI CLINICAL PLATFORM</p>
+              <button
+                className={`api-status-pill ${isLive ? 'live' : 'demo'}`}
+                onClick={() => setConnModalOpen(true)}
+                title="Click to configure backend API connection"
+              >
+                <span className="dot" />
+                <span>{isLive ? 'Live API Connected' : 'Standalone Demo Mode'}</span>
+                <Settings size={11} style={{ marginLeft: 2, opacity: 0.7 }} />
+              </button>
+            </div>
+            <h1>
+              {userRole === 'doctor' ? `Clinician Workspace — ${userName}` : `Patient Medical Portal — ${userName}`}
+            </h1>
           </div>
           <div className="head-actions">
-            {user?.role === 'doctor' ? (
+            {userRole === 'doctor' ? (
               <>
                 <NavLink to="/records" className="button">
                   <Upload size={16} /> Ingest & Review Records
@@ -109,13 +212,82 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                 </NavLink>
               </>
             ) : (
-              <NavLink to={`/reports/${user?.id}`} className="button">
+              <NavLink to={`/reports/${userId}`} className="button">
                 <FileText size={16} /> My Clinical Intelligence Report
               </NavLink>
             )}
           </div>
         </header>
-        {children}
+
+        <ErrorBoundary>
+          {children}
+        </ErrorBoundary>
+
+        {/* API Connection Settings Modal */}
+        {connModalOpen && (
+          <div className="conn-modal-backdrop" onClick={() => setConnModalOpen(false)}>
+            <div className="conn-modal" onClick={e => e.stopPropagation()}>
+              <h3><Settings size={20} /> Backend API Connection</h3>
+              <p>
+                Configure the FastAPI backend URL. If the server is offline or spinning up, MediLens AI
+                automatically runs with its built-in longitudinal ML engine so no features or pages break.
+              </p>
+
+              <label style={{ display: 'block', fontSize: 12, marginBottom: 6, color: '#cbd5e1' }}>
+                Backend API Base URL:
+              </label>
+              <input
+                type="text"
+                value={apiUrlInput}
+                onChange={e => setApiUrlInput(e.target.value)}
+                placeholder="http://localhost:8000/api/v1 or https://your-backend.onrender.com/api/v1"
+              />
+
+              {connFeedback && (
+                <div style={{
+                  fontSize: 12,
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  marginBottom: 12,
+                  background: isLive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                  color: isLive ? '#34d399' : '#fbbf24',
+                  border: `1px solid ${isLive ? '#059669' : '#d97706'}`,
+                }}>
+                  {connFeedback}
+                </div>
+              )}
+
+              <div className="conn-modal-actions">
+                <button
+                  type="button"
+                  className="button secondary"
+                  style={{ fontSize: 12 }}
+                  onClick={handleResetDefaultUrl}
+                  disabled={testingConn}
+                >
+                  Reset Default
+                </button>
+                <button
+                  type="button"
+                  className="button secondary"
+                  style={{ fontSize: 12 }}
+                  onClick={() => setConnModalOpen(false)}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  style={{ fontSize: 12 }}
+                  onClick={handleTestAndSaveUrl}
+                  disabled={testingConn}
+                >
+                  {testingConn ? 'Testing...' : 'Test & Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   )
@@ -141,16 +313,33 @@ function Loading() {
 function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const { data, isLoading } = useQuery({ queryKey: ['dashboard', user?.id], queryFn: getDashboard })
+  const { data, isLoading } = useQuery({
+    queryKey: ['dashboard', user?.id, user?.role],
+    queryFn: () => getDashboard(user),
+  })
 
-  if (isLoading) return <Loading />
-  const d = data!
+  if (isLoading && !data) return <Loading />
+  const d: DashboardData = data || mockGetDashboard(user)
 
+  const riskDist = d?.risk_distribution || { HIGH: 0, MEDIUM: 0, LOW: 0 }
   const chartData = [
-    { name: 'HIGH RISK', count: d.risk_distribution.HIGH || 0, fill: '#ef4444' },
-    { name: 'MEDIUM RISK', count: d.risk_distribution.MEDIUM || 0, fill: '#f59e0b' },
-    { name: 'LOW RISK', count: d.risk_distribution.LOW || 0, fill: '#10b981' },
+    { name: 'HIGH RISK', count: riskDist.HIGH || 0, fill: '#ef4444' },
+    { name: 'MEDIUM RISK', count: riskDist.MEDIUM || 0, fill: '#f59e0b' },
+    { name: 'LOW RISK', count: riskDist.LOW || 0, fill: '#10b981' },
   ]
+
+  const metrics = d?.metrics || {
+    total_patients: 0,
+    patients_analyzed: 0,
+    records_processed: 0,
+    high_risk_signals: 0,
+    new_anomalies: 0,
+    pending_review: 0,
+    today_analyses: 0,
+  }
+
+  const alerts = d?.alerts || []
+  const recentPatients = d?.recent_patients || []
 
   return (
     <>
@@ -173,7 +362,7 @@ function Dashboard() {
                 </button>
               </>
             ) : (
-              <button className="button" onClick={() => navigate(`/reports/${user?.id}`)}>
+              <button className="button" onClick={() => navigate(`/reports/${user?.id || 'P1001'}`)}>
                 <FileText size={16} /> View My Health Intelligence Report
               </button>
             )}
@@ -216,10 +405,10 @@ function Dashboard() {
 
       {/* Metrics */}
       <div className="metrics">
-        <MetricCard label="Total Patients" value={d.metrics.total_patients} note="Assigned to clinician" kind="blue" />
-        <MetricCard label="Today's Reports" value={d.metrics.today_analyses || 4} note="AI reports generated" kind="purple" />
-        <MetricCard label="Critical Patients" value={d.metrics.high_risk_signals} note="ML-flagged elevated risk" kind="red" />
-        <MetricCard label="Pending Reviews" value={d.metrics.pending_review || 2} note="Awaiting doctor sign-off" kind="amber" />
+        <MetricCard label="Total Patients" value={metrics.total_patients} note="Assigned to clinician" kind="blue" />
+        <MetricCard label="Today's Reports" value={metrics.today_analyses || 4} note="AI reports generated" kind="purple" />
+        <MetricCard label="Critical Patients" value={metrics.high_risk_signals} note="ML-flagged elevated risk" kind="red" />
+        <MetricCard label="Pending Reviews" value={metrics.pending_review || 2} note="Awaiting doctor sign-off" kind="amber" />
       </div>
 
       <div className="grid two gap-20">
@@ -232,7 +421,7 @@ function Dashboard() {
             </div>
             {user?.role === 'doctor' && <NavLink to="/patients">View all patients</NavLink>}
           </div>
-          <PatientTable patients={d.recent_patients} />
+          <PatientTable patients={recentPatients} />
         </section>
 
         {/* Risk Distribution Chart & Alerts */}
@@ -260,8 +449,8 @@ function Dashboard() {
           </div>
 
           <h3>Recent Anomaly Alerts</h3>
-          {d.alerts.length ? (
-            d.alerts.map((a, i) => (
+          {alerts.length ? (
+            alerts.map((a, i) => (
               <div
                 className="alert-item"
                 key={i}
@@ -286,6 +475,10 @@ function Dashboard() {
 
 function PatientTable({ patients }: { patients: Patient[] }) {
   const navigate = useNavigate()
+  if (!patients || !patients.length) {
+    return <p className="muted" style={{ padding: 20 }}>No patients found.</p>
+  }
+
   return (
     <div className="table-wrap">
       <table>
@@ -324,7 +517,10 @@ function PatientTable({ patients }: { patients: Patient[] }) {
 function Patients() {
   const { user } = useAuth()
   const [q, setQ] = useState('')
-  const { data = [], isLoading } = useQuery({ queryKey: ['patients', q], queryFn: () => getPatients(q) })
+  const { data = [], isLoading } = useQuery({
+    queryKey: ['patients', q, user?.id],
+    queryFn: () => getPatients(q, user),
+  })
 
   if (user?.role === 'patient') {
     return (
@@ -332,7 +528,7 @@ function Patients() {
         <AlertTriangle size={24} className="red-text" />
         <h2>403 — Unauthorized Access</h2>
         <p>Patients are restricted from viewing the cohort patient directory for privacy compliance.</p>
-        <NavLink to={`/reports/${user.id}`} className="button">View My Report</NavLink>
+        <NavLink to={`/reports/${user?.id || 'P1001'}`} className="button">View My Report</NavLink>
       </div>
     )
   }
@@ -357,14 +553,14 @@ function Patients() {
             />
           </div>
         </div>
-        {isLoading ? <Loading /> : <PatientTable patients={data} />}
+        {isLoading && !data.length ? <Loading /> : <PatientTable patients={data} />}
       </section>
     </>
   )
 }
 
 function PatientIntelligence() {
-  const { id = '' } = useParams()
+  const { id = 'P1001' } = useParams()
   const { user } = useAuth()
   const navigate = useNavigate()
   const { data, isLoading, isError, error } = useQuery({
@@ -376,8 +572,10 @@ function PatientIntelligence() {
   const analyzeMut = useMutation({ mutationFn: () => analyzePatient(id) })
   const reportMut = useMutation({ mutationFn: () => generateReport(id), onSuccess: () => navigate(`/reports/${id}`) })
 
-  if (isLoading) return <Loading />
-  if (isError || !data) {
+  if (isLoading && !data) return <Loading />
+  const patientData = data || mockGetPatient(id)
+
+  if (isError && !data) {
     return (
       <div className="card error-card">
         <AlertTriangle size={32} className="red-text" />
@@ -392,9 +590,9 @@ function PatientIntelligence() {
     <>
       <div className="page-head">
         <div>
-          <p className="eyebrow">PATIENT INTELLIGENCE DASHBOARD · {data.id}</p>
-          <h2>{data.name}</h2>
-          <p>{data.age} yrs · {data.gender} · Blood Group: {data.blood_group || 'O+'} · Attending Doctor: {data.doctor_name || 'Dr. Sarah Jenkins'}</p>
+          <p className="eyebrow">PATIENT INTELLIGENCE DASHBOARD · {patientData.id}</p>
+          <h2>{patientData.name}</h2>
+          <p>{patientData.age} yrs · {patientData.gender} · Blood Group: {patientData.blood_group || 'O+'} · Attending Doctor: {patientData.doctor_name || 'Dr. Sarah Jenkins'}</p>
         </div>
         <div className="head-actions">
           <button className="button secondary" onClick={() => analyzeMut.mutate()} disabled={analyzeMut.isPending}>
@@ -406,12 +604,13 @@ function PatientIntelligence() {
         </div>
       </div>
 
-      <ClinicalReportView patient={data} />
+      <ClinicalReportView patient={patientData} />
     </>
   )
 }
 
 function RecordsUpload() {
+  const { user } = useAuth()
   const [file, setFile] = useState<File | null>(null)
   const [patientId, setPatientId] = useState('')
   const [draft, setDraft] = useState<ExtractedDraft | null>(null)
@@ -422,7 +621,7 @@ function RecordsUpload() {
   const fileRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const { data: patients = [] } = useQuery({ queryKey: ['patients'], queryFn: () => getPatients() })
+  const { data: patients = [] } = useQuery({ queryKey: ['patients', user?.id], queryFn: () => getPatients('', user) })
 
   const handleStartExtraction = async () => {
     if (!file) return
@@ -446,7 +645,6 @@ function RecordsUpload() {
     setReviewError(null)
     try {
       const res = await confirmUpload(reviewedData)
-      console.log('Report generation succeeded:', res)
       qc.invalidateQueries({ queryKey: ['dashboard'] })
       qc.invalidateQueries({ queryKey: ['patients'] })
       qc.invalidateQueries({ queryKey: ['reports'] })
@@ -552,8 +750,10 @@ function ReportPage() {
     retry: false,
   })
 
-  if (isLoading) return <Loading />
-  if (isError || !patient) {
+  if (isLoading && !patient) return <Loading />
+  const patientData = patient || mockGetPatient(id)
+
+  if (isError && !patient) {
     return (
       <div className="card error-card">
         <AlertTriangle size={32} className="red-text" />
@@ -564,14 +764,15 @@ function ReportPage() {
     )
   }
 
-  return <ClinicalReportView patient={patient} />
+  return <ClinicalReportView patient={patientData} />
 }
 
 function ReportsIndex() {
   const { data = [], isLoading } = useQuery({ queryKey: ['reports'], queryFn: getReports })
   const navigate = useNavigate()
 
-  if (isLoading) return <Loading />
+  if (isLoading && !data.length) return <Loading />
+  const reportsList = data && data.length > 0 ? data : mockGetReports()
 
   return (
     <>
@@ -597,7 +798,7 @@ function ReportsIndex() {
               </tr>
             </thead>
             <tbody>
-              {data.map((r: ReportSavedEntry) => (
+              {reportsList.map((r: ReportSavedEntry) => (
                 <tr key={r.id} onClick={() => navigate(`/reports/${r.patient_id}`)}>
                   <td><strong>{r.id}</strong></td>
                   <td>{r.patient_id}</td>

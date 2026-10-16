@@ -15,6 +15,7 @@ SECRET_KEY = "medilens_ai_clinical_secret_key"
 def create_access_token(user_id: str, role: str, extra: dict[str, Any] | None = None) -> str:
     payload = {
         "sub": user_id,
+        "id": user_id,
         "role": role,
         "exp": int(time.time()) + 86400 * 7,  # 7 days
         **(extra or {}),
@@ -45,6 +46,8 @@ def get_current_user(authorization: str | None = Header(None)) -> dict[str, Any]
             "role": "doctor",
             "name": doc["name"],
             "doctor_id": doc["id"],
+            "specialty": doc.get("specialty", "Cardiology & Internal Medicine"),
+            "hospital": doc.get("hospital", "MediLens AI Medical Center"),
         }
     
     payload = decode_token(authorization)
@@ -53,7 +56,23 @@ def get_current_user(authorization: str | None = Header(None)) -> dict[str, Any]
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired authentication token",
         )
-    return payload
+    user_id = payload.get("id") or payload.get("sub", "")
+    role = payload.get("role", "doctor")
+    result = dict(payload)
+    result["id"] = user_id
+    if role == "doctor":
+        doc = next((d for d in DOCTORS if d["id"] == user_id or d["username"] == user_id), None)
+        if doc:
+            result.setdefault("name", doc["name"])
+            result.setdefault("doctor_id", doc["id"])
+            result.setdefault("specialty", doc.get("specialty", "Cardiology & Internal Medicine"))
+            result.setdefault("hospital", doc.get("hospital", "MediLens AI Medical Center"))
+    elif role == "patient":
+        patient = next((p for p in PATIENTS if p["id"] == user_id or p.get("username", "") == user_id), None)
+        if patient:
+            result.setdefault("name", patient["name"])
+            result.setdefault("patient_id", patient["id"])
+    return result
 
 
 def verify_patient_access(patient_id: str, current_user: dict[str, Any]) -> dict[str, Any]:

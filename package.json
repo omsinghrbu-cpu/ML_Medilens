@@ -1,0 +1,9 @@
+{
+  "name": "medilens-ai-workspace",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix MediLens-AI/frontend run dev",
+    "build": "npm --prefix MediLens-AI/frontend run build",
+    "start": "npm --prefix MediLens-AI/frontend run preview"
+  }
+}

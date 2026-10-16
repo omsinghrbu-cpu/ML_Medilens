@@ -27,7 +27,7 @@ interface DoctorReviewModalProps {
 }
 
 export function DoctorReviewModal({ draft, onConfirm, onCancel, isSubmitting, errorText }: DoctorReviewModalProps) {
-  const sum = draft.extracted_summary
+  const sum = (draft?.extracted_summary || {}) as any
 
   // Editable Form State
   const [name, setName] = useState(sum.name || 'Arjun Mehta')
