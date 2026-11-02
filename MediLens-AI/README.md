@@ -2,6 +2,7 @@
 
 AI-driven patient record analysis and monitoring for clinician workflows. This starter is intentionally a **clinical decision-support demo**, not a diagnostic device: every AI-generated output requires clinician review.
 
+https://ml-medilens-l2bb-tau.vercel.app/
 ## Included
 
 - Responsive React/Vite clinician dashboard, patient search, longitudinal profile, charts, AI-analysis screen, and print-to-PDF clinical report.
